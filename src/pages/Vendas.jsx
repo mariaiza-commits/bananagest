@@ -26,7 +26,6 @@ export default function Vendas({ onAddBtn }) {
 
   // ── filtros ──────────────────────────────────────────────────
   const [vendasComAnexo, setVendasComAnexo] = useState(new Set())
-  const [busca, setBusca]       = useState('')
   const [fVencDe, setFVencDe]   = useState('')
   const [fVencAte, setFVencAte] = useState('')
   const [fCargaDe, setFCargaDe] = useState('')
@@ -291,11 +290,6 @@ export default function Vendas({ onAddBtn }) {
   const vendasFiltradas = useMemo(() => {
     const mapaCarga = new Map(cargas.map(c => [c.carga_id, c.data]))
     return vendas.filter(v => {
-      // texto livre no comprador
-      if (busca.trim()) {
-        const alvo = (v.comprador || '').toLowerCase()
-        if (!alvo.includes(busca.trim().toLowerCase())) return false
-      }
       // vencimento
       const venc = v.data_vencimento ? v.data_vencimento.slice(0, 10) : null
       if (fVencDe  && (!venc || venc < fVencDe))  return false
@@ -314,7 +308,7 @@ export default function Vendas({ onAddBtn }) {
       if (fAnexo === 'sem' &&  vendasComAnexo.has(v.id)) return false
       return true
     })
-  }, [vendas, cargas, busca, fVencDe, fVencAte, fCargaDe, fCargaAte, fCliente, fStatus, fAnexo, vendasComAnexo])
+  }, [vendas, cargas, fVencDe, fVencAte, fCargaDe, fCargaAte, fCliente, fStatus, fAnexo, vendasComAnexo])
 
   const totalReceita  = vendas.reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
   const totalPendente = vendas.filter(v => v.status_pagamento === 'pendente').reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
@@ -341,16 +335,6 @@ export default function Vendas({ onAddBtn }) {
       {/* FILTROS */}
       <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'12px 14px',marginBottom:12}}>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end'}}>
-          <div style={{flex:'1 1 180px',minWidth:150}}>
-            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Buscar cliente</label>
-            <input
-              type="text"
-              placeholder="Digite o nome..."
-              value={busca}
-              onChange={e=>setBusca(e.target.value)}
-              style={{width:'100%',padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}
-            />
-          </div>
           <div style={{flex:'1 1 160px',minWidth:140}}>
             <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Cliente</label>
             <select value={fCliente} onChange={e=>setFCliente(e.target.value)}
@@ -402,7 +386,7 @@ export default function Vendas({ onAddBtn }) {
           </div>
           <div style={{flex:'0 0 auto',display:'flex',alignItems:'flex-end',gap:10,paddingBottom:1}}>
             <button className="btn btn-sm"
-              onClick={()=>{setBusca('');setFVencDe('');setFVencAte('');setFCargaDe('');setFCargaAte('');setFCliente('');setFStatus('');setFAnexo('')}}
+              onClick={()=>{setFVencDe('');setFVencAte('');setFCargaDe('');setFCargaAte('');setFCliente('');setFStatus('');setFAnexo('')}}
               style={{whiteSpace:'nowrap'}}>
               ✕ Limpar filtros
             </button>

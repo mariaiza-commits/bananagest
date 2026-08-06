@@ -24,6 +24,17 @@ export default function Vendas({ onAddBtn }) {
   const [uploadTipo, setUploadTipo]     = useState('xml')
   const [erroAnexo, setErroAnexo]       = useState('')
 
+  // ── filtros ──────────────────────────────────────────────────
+  const [vendasComAnexo, setVendasComAnexo] = useState(new Set())
+  const [busca, setBusca]       = useState('')
+  const [fVencDe, setFVencDe]   = useState('')
+  const [fVencAte, setFVencAte] = useState('')
+  const [fCargaDe, setFCargaDe] = useState('')
+  const [fCargaAte, setFCargaAte] = useState('')
+  const [fCliente, setFCliente] = useState('')
+  const [fStatus, setFStatus]   = useState('')
+  const [fAnexo, setFAnexo]     = useState('')
+
   const [form, setForm] = useState({
     carga_id: '', client_id: '',
     data_venda: new Date().toISOString().split('T')[0],
@@ -51,6 +62,13 @@ export default function Vendas({ onAddBtn }) {
       setCargas(cs ?? [])
       setClientes(cls ?? [])
       setContas(cfs ?? [])
+      // IDs de vendas com anexo (payload mínimo: só venda_id)
+      try {
+        const { data: anexosData } = await supabase
+          .from('venda_anexos')
+          .select('venda_id')
+        setVendasComAnexo(new Set((anexosData ?? []).map(a => a.venda_id)))
+      } catch { /* se falhar, tudo fica como "sem anexo" — não quebra a tela */ }
     } catch (e) { handleAuthError(e) } finally {
       setLoading(false)
     }
@@ -270,6 +288,34 @@ export default function Vendas({ onAddBtn }) {
     setAnexos(prev => prev.filter(a => a.id !== id))
   }
 
+  const vendasFiltradas = useMemo(() => {
+    const mapaCarga = new Map(cargas.map(c => [c.carga_id, c.data]))
+    return vendas.filter(v => {
+      // texto livre no comprador
+      if (busca.trim()) {
+        const alvo = (v.comprador || '').toLowerCase()
+        if (!alvo.includes(busca.trim().toLowerCase())) return false
+      }
+      // vencimento
+      const venc = v.data_vencimento ? v.data_vencimento.slice(0, 10) : null
+      if (fVencDe  && (!venc || venc < fVencDe))  return false
+      if (fVencAte && (!venc || venc > fVencAte)) return false
+      // data da carga
+      const raw = v.carga_id ? mapaCarga.get(v.carga_id) : null
+      const dCarga = raw ? String(raw).slice(0, 10) : null
+      if (fCargaDe  && (!dCarga || dCarga < fCargaDe))  return false
+      if (fCargaAte && (!dCarga || dCarga > fCargaAte)) return false
+      // cliente
+      if (fCliente && v.client_id !== fCliente) return false
+      // status
+      if (fStatus && v.status_pagamento !== fStatus) return false
+      // anexo
+      if (fAnexo === 'com' && !vendasComAnexo.has(v.id)) return false
+      if (fAnexo === 'sem' &&  vendasComAnexo.has(v.id)) return false
+      return true
+    })
+  }, [vendas, cargas, busca, fVencDe, fVencAte, fCargaDe, fCargaAte, fCliente, fStatus, fAnexo, vendasComAnexo])
+
   const totalReceita  = vendas.reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
   const totalPendente = vendas.filter(v => v.status_pagamento === 'pendente').reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
   const statusColor   = { pendente:'var(--amber)', recebido:'var(--green)', pago:'var(--green)', atrasado:'var(--red)' }
@@ -292,13 +338,88 @@ export default function Vendas({ onAddBtn }) {
         ))}
       </div>
 
+      {/* FILTROS */}
+      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'12px 14px',marginBottom:12}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div style={{flex:'1 1 180px',minWidth:150}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Buscar cliente</label>
+            <input
+              type="text"
+              placeholder="Digite o nome..."
+              value={busca}
+              onChange={e=>setBusca(e.target.value)}
+              style={{width:'100%',padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}
+            />
+          </div>
+          <div style={{flex:'1 1 160px',minWidth:140}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Cliente</label>
+            <select value={fCliente} onChange={e=>setFCliente(e.target.value)}
+              style={{width:'100%',padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">Todos os clientes</option>
+              {clientes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div style={{flex:'1 1 140px',minWidth:130}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Status</label>
+            <select value={fStatus} onChange={e=>setFStatus(e.target.value)}
+              style={{width:'100%',padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">Todos</option>
+              <option value="pendente">⏳ Pendente</option>
+              <option value="recebido">✅ Recebido</option>
+              <option value="atrasado">🔴 Atrasado</option>
+            </select>
+          </div>
+          <div style={{flex:'1 1 130px',minWidth:120}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Anexo</label>
+            <select value={fAnexo} onChange={e=>setFAnexo(e.target.value)}
+              style={{width:'100%',padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',fontSize:13,background:'var(--bg)',color:'var(--text)'}}>
+              <option value="">Todos</option>
+              <option value="com">📎 Com anexo</option>
+              <option value="sem">Sem anexo</option>
+            </select>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end',marginTop:8}}>
+          <div style={{flex:'1 1 130px',minWidth:120}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Venc. de</label>
+            <input type="date" value={fVencDe} onChange={e=>setFVencDe(e.target.value)}
+              style={{width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}/>
+          </div>
+          <div style={{flex:'1 1 130px',minWidth:120}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Venc. até</label>
+            <input type="date" value={fVencAte} onChange={e=>setFVencAte(e.target.value)}
+              style={{width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}/>
+          </div>
+          <div style={{flex:'1 1 130px',minWidth:120}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Carga de</label>
+            <input type="date" value={fCargaDe} onChange={e=>setFCargaDe(e.target.value)}
+              style={{width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}/>
+          </div>
+          <div style={{flex:'1 1 130px',minWidth:120}}>
+            <label style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',display:'block',marginBottom:4}}>Carga até</label>
+            <input type="date" value={fCargaAte} onChange={e=>setFCargaAte(e.target.value)}
+              style={{width:'100%',padding:'6px 8px',borderRadius:6,border:'1px solid var(--border)',fontSize:12,background:'var(--bg)',color:'var(--text)',boxSizing:'border-box'}}/>
+          </div>
+          <div style={{flex:'0 0 auto',display:'flex',alignItems:'flex-end',gap:10,paddingBottom:1}}>
+            <button className="btn btn-sm"
+              onClick={()=>{setBusca('');setFVencDe('');setFVencAte('');setFCargaDe('');setFCargaAte('');setFCliente('');setFStatus('');setFAnexo('')}}
+              style={{whiteSpace:'nowrap'}}>
+              ✕ Limpar filtros
+            </button>
+            <span style={{fontSize:12,color:'var(--text-muted)',whiteSpace:'nowrap'}}>
+              {vendasFiltradas.length} de {vendas.length}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* LISTA */}
       {vendas.length === 0
         ? <div className="empty">Nenhuma venda registrada.</div>
         : <div className="card">
             <div style={{display:'flex',justifyContent:'flex-end',marginBottom:10}}>
               <BtnExportar
-                dados={vendas.map(v => ({
+                dados={vendasFiltradas.map(v => ({
                   'Data': fmtDate(v.data_venda),
                   'Cliente': v.comprador || '—',
                   'Condição': v.condicao || '—',
@@ -323,10 +444,18 @@ export default function Vendas({ onAddBtn }) {
                   <th>Vencimento</th><th>Status</th><th></th>
                 </tr></thead>
                 <tbody>
-                  {vendas.map(v => (
+                  {vendasFiltradas.length === 0 && (
+                    <tr><td colSpan={12} style={{textAlign:'center',padding:24,color:'var(--text-muted)',fontStyle:'italic'}}>
+                      Nenhuma venda encontrada com esses filtros.
+                    </td></tr>
+                  )}
+                  {vendasFiltradas.map(v => (
                     <tr key={v.id} style={{cursor:'pointer'}} onClick={() => setDetalhe(v)}>
                       <td><strong>{fmtDate(v.data_venda)}</strong></td>
-                      <td>{v.comprador || '—'}</td>
+                      <td>
+                        {v.comprador || '—'}
+                        {vendasComAnexo.has(v.id) && <span title="Tem anexo" style={{marginLeft:4,fontSize:11}}>📎</span>}
+                      </td>
                       <td>
                         <span style={{ fontSize:11, fontWeight:600, background:v.forma_pagamento==='avista'?'var(--green-light)':'var(--amber-light)', color:v.forma_pagamento==='avista'?'var(--green)':'var(--amber)', borderRadius:4, padding:'1px 7px' }}>
                           {v.forma_pagamento === 'avista' ? 'À vista' : 'A prazo'}

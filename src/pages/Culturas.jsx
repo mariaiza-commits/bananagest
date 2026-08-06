@@ -184,11 +184,11 @@ export default function Culturas({ onAddBtn }) {
               <div style={{ display:'flex', gap:10, marginBottom:10 }}>
                 <div style={{ flex:1, background:'var(--bg)', borderRadius:6, padding:'6px 10px', minWidth:0 }}>
                   <div style={{ fontSize:10, color:'var(--text-muted)' }}>Receita</div>
-                  <div style={{ fontWeight:700, color:'var(--teal)', fontSize:'clamp(11px,2.5vw,14px)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{fmt(rec)}</div>
+                  <div style={{ fontWeight:700, color:'var(--teal)', fontSize:'clamp(10px,2.2vw,13px)', whiteSpace:'normal', wordBreak:'break-word' }}>{fmt(rec)}</div>
                 </div>
                 <div style={{ flex:1, background:'var(--bg)', borderRadius:6, padding:'6px 10px', minWidth:0 }}>
                   <div style={{ fontSize:10, color:'var(--text-muted)' }}>Lucro</div>
-                  <div style={{ fontWeight:700, color: lucro >= 0 ? 'var(--green)' : 'var(--red)', fontSize:'clamp(11px,2.5vw,14px)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{fmt(lucro)}</div>
+                  <div style={{ fontWeight:700, color: lucro >= 0 ? 'var(--green)' : 'var(--red)', fontSize:'clamp(10px,2.2vw,13px)', whiteSpace:'normal', wordBreak:'break-word' }}>{fmt(lucro)}</div>
                 </div>
               </div>
 

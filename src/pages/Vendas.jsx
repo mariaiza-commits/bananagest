@@ -1,4 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { supabase } from '../lib/supabase'
 import { fmt, fmtDate, BtnExportar } from '../lib/utils'
 import { useAuth } from '../contexts/AuthContext'
@@ -313,8 +315,6 @@ export default function Vendas({ onAddBtn }) {
 
   async function gerarRomaneio(venda) {
     try {
-      const { jsPDF } = await import('jspdf')
-      await import('jspdf-autotable')
 
       const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
       const fmtD = s => {
@@ -413,7 +413,7 @@ export default function Vendas({ onAddBtn }) {
       y += 20
 
       // tabela de itens
-      doc.autoTable({
+      autoTable(doc, {
         startY: y,
         margin: { left: L, right: L },
         head: [['ESPÉCIE', 'QTD', 'PREÇO UN.', 'TOTAL']],

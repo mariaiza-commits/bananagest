@@ -310,6 +310,194 @@ export default function Vendas({ onAddBtn }) {
     })
   }, [vendas, cargas, fVencDe, fVencAte, fCargaDe, fCargaAte, fCliente, fStatus, fAnexo, vendasComAnexo])
 
+
+  async function gerarRomaneio(venda) {
+    try {
+      const { jsPDF } = await import('jspdf')
+      await import('jspdf-autotable')
+
+      const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+      const fmtD = s => {
+        if (!s) return '—'
+        const p = String(s).slice(0, 10).split('-')
+        return `${p[2]}/${p[1]}/${p[0]}`
+      }
+
+      // data da carga
+      const cargaObj = cargas.find(c => c.carga_id === venda.carga_id)
+      const dataCarga = cargaObj?.data ?? null
+
+      // buscar carga_itens (só os campos necessários)
+      let itensCarga = []
+      if (venda.carga_id) {
+        const { data } = await supabase
+          .from('carga_itens')
+          .select('quantidade_primeira,quantidade_segunda,peso_medio_primeira,peso_medio_segunda,preco_kg_primeira,preco_kg_segunda')
+          .eq('carga_id', venda.carga_id)
+        itensCarga = data ?? []
+      }
+
+      // consolidar por (qualidade, peso, preco) — mesmos campo viram 1 linha
+      const grupos = {}
+      for (const it of itensCarga) {
+        const q1 = Number(it.quantidade_primeira) || 0
+        const q2 = Number(it.quantidade_segunda)  || 0
+        if (q1 > 0) {
+          const k = `1|${it.peso_medio_primeira}|${it.preco_kg_primeira}`
+          if (!grupos[k]) grupos[k] = {
+            especie: `Banana 1ª · ${it.peso_medio_primeira} kg`,
+            qtd: 0, peso: Number(it.peso_medio_primeira) || 0, preco: Number(it.preco_kg_primeira) || 0,
+          }
+          grupos[k].qtd += q1
+        }
+        if (q2 > 0) {
+          const k = `2|${it.peso_medio_segunda}|${it.preco_kg_segunda}`
+          if (!grupos[k]) grupos[k] = {
+            especie: `Banana 2ª · ${it.peso_medio_segunda} kg`,
+            qtd: 0, peso: Number(it.peso_medio_segunda) || 0, preco: Number(it.preco_kg_segunda) || 0,
+          }
+          grupos[k].qtd += q2
+        }
+      }
+
+      const linhas = Object.values(grupos).map(g => [
+        g.especie,
+        `${g.qtd} cx`,
+        brl(g.preco),
+        brl(g.qtd * g.peso * g.preco),
+      ])
+
+      // deduções
+      const ptv      = Number(venda.ptv_valor)          || 0
+      const funrural = Number(venda.funrural_valor)      || 0
+      const descPct  = Number(venda.desconto_avista_pct) || 0
+      const descVal  = (Number(venda.valor_total) - funrural) * (descPct / 100)
+      const temDeduc = ptv !== 0 || funrural !== 0 || descVal !== 0
+
+      // ── montar PDF A4 ─────────────────────────────────────────────────────
+      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
+      const W = 210, L = 15, R = 195
+      let y = 22
+
+      // cabeçalho
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(22)
+      doc.setTextColor(30, 90, 55)
+      doc.text('FRUTMINAS', W / 2, y, { align: 'center' })
+      y += 8
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(110, 110, 110)
+      doc.text('Romaneio de venda', W / 2, y, { align: 'center' })
+      y += 10
+
+      doc.setDrawColor(210, 210, 210)
+      doc.setLineWidth(0.3)
+      doc.line(L, y, R, y)
+      y += 8
+
+      // cliente / data
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(130, 130, 130)
+      doc.text('Cliente', L, y)
+      doc.text('Data da carga', L, y + 7)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.setTextColor(30, 30, 30)
+      doc.text(venda.comprador || '—', R, y, { align: 'right' })
+      doc.setFontSize(11)
+      doc.text(fmtD(dataCarga), R, y + 7, { align: 'right' })
+      y += 20
+
+      // tabela de itens
+      doc.autoTable({
+        startY: y,
+        margin: { left: L, right: L },
+        head: [['ESPÉCIE', 'QTD', 'PREÇO UN.', 'TOTAL']],
+        body: linhas.length > 0 ? linhas : [['Sem itens de carga', '', '', '']],
+        styles: {
+          fontSize: 10,
+          cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+          textColor: [40, 40, 40],
+        },
+        headStyles: {
+          fillColor: [255, 255, 255],
+          textColor: [55, 120, 75],
+          fontStyle: 'bold',
+          fontSize: 9,
+          lineWidth: { bottom: 0.4 },
+          lineColor: [200, 200, 200],
+        },
+        columnStyles: {
+          0: { cellWidth: 'auto' },
+          1: { halign: 'center', cellWidth: 22 },
+          2: { halign: 'right',  cellWidth: 32 },
+          3: { halign: 'right',  cellWidth: 36 },
+        },
+        alternateRowStyles: { fillColor: [248, 249, 248] },
+      })
+      y = doc.lastAutoTable.finalY + 10
+
+      // valor total da carga
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.setTextColor(30, 30, 30)
+      doc.text('Valor total da carga', L, y)
+      doc.text(brl(venda.valor_total), R, y, { align: 'right' })
+      y += 8
+
+      // deduções (aparecem sempre que ao menos uma for != 0)
+      if (temDeduc) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.setTextColor(180, 50, 40)
+
+        doc.text('PTV', L, y)
+        doc.text(`- ${brl(ptv)}`, R, y, { align: 'right' })
+        y += 6
+
+        doc.text(`Desconto à vista (${descPct}%)`, L, y)
+        doc.text(`- ${brl(descVal)}`, R, y, { align: 'right' })
+        y += 6
+
+        doc.text(`Funrural (${venda.funrural_pct || 0}%)`, L, y)
+        doc.text(`- ${brl(funrural)}`, R, y, { align: 'right' })
+        y += 10
+      }
+
+      // linha final
+      doc.setDrawColor(210, 210, 210)
+      doc.setLineWidth(0.3)
+      doc.line(L, y, R, y)
+      y += 10
+
+      // total com desconto
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+      doc.setTextColor(90, 90, 90)
+      doc.text('Total com desconto', L, y + 4)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(22)
+      doc.setTextColor(30, 110, 55)
+      doc.text(brl(venda.valor_liquido), R, y + 6, { align: 'right' })
+
+      // nome do arquivo: romaneio-cliente-dataCarga.pdf
+      const nomeSafe = (venda.comprador || 'cliente')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').toLowerCase()
+      const dataNome = dataCarga ? String(dataCarga).slice(0, 10).replace(/-/g, '') : 'data'
+      doc.save(`romaneio-${nomeSafe}-${dataNome}.pdf`)
+
+    } catch (err) {
+      console.error('[gerarRomaneio]', err)
+      alert('Erro ao gerar romaneio: ' + err.message)
+    }
+  }
+
   const totalReceita  = vendas.reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
   const totalPendente = vendas.filter(v => v.status_pagamento === 'pendente').reduce((s, v) => s + Number(v.valor_liquido ?? 0), 0)
   const statusColor   = { pendente:'var(--amber)', recebido:'var(--green)', pago:'var(--green)', atrasado:'var(--red)' }
@@ -474,6 +662,7 @@ export default function Vendas({ onAddBtn }) {
                               ↩ Desfazer
                             </button>
                           )}
+                          <button className="btn btn-sm" onClick={()=>gerarRomaneio(v)} title="Gerar romaneio">📋</button>
                           <button className="btn btn-sm" onClick={()=>abrirModalAnexos(v)} title="Notas fiscais">📎</button>
                           <button className="btn btn-sm" onClick={()=>openModal(v)}>✎</button>
                           <button className="btn btn-sm btn-danger" onClick={()=>excluir(v.id)}>✕</button>
@@ -518,6 +707,7 @@ export default function Vendas({ onAddBtn }) {
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={()=>setDetalhe(null)}>Fechar</button>
+              <button className="btn" onClick={()=>gerarRomaneio(detalhe)}>📋 Romaneio</button>
               <button className="btn btn-primary" onClick={()=>{setDetalhe(null);openModal(detalhe)}}>✎ Editar</button>
             </div>
           </div>

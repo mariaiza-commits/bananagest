@@ -642,11 +642,6 @@ export default function Vendas({ onAddBtn }) {
                       <td style={{fontSize:12, color: v.data_vencimento && new Date(v.data_vencimento) < new Date() && v.status_pagamento==='pendente' ? 'var(--red)' : 'var(--text-muted)'}}>
                         {v.data_vencimento ? fmtDate(v.data_vencimento) : '—'}
                       </td>
-                      <td>
-                        <span style={{ fontSize:11, fontWeight:600, color:statusColor[v.status_pagamento]??'var(--text-muted)' }}>
-                          {v.status_pagamento==='recebido'?'✅ Recebido':v.status_pagamento==='pendente'?'⏳ Pendente':v.status_pagamento}
-                        </span>
-                      </td>
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{display:'flex', gap:4}}>
                           {(v.status_pagamento==='pendente'||v.status_pagamento==='atrasado') && (

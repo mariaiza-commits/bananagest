@@ -1,6 +1,4 @@
-﻿import React, { useEffect, useState } from 'react'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { fmt, fmtDate } from '../lib/utils'
@@ -35,8 +33,6 @@ export default function Relatorios() {
   const [variedades,       setVariedades]        = useState([])
   const [dataInicio,       setDataInicio]       = useState('')
   const [dataFim,          setDataFim]          = useState('')
-  const [selecionados,     setSelecionados]     = useState(new Set())
-  const [cargas,           setCargas]           = useState([])
 
   useEffect(() => { loadFiltros() }, [])
 
@@ -57,7 +53,6 @@ export default function Relatorios() {
     setRelAtivo(tipo)
     setLoading(true)
     setDados([])
-    setSelecionados(new Set())
     try {
 
     let rows = []
@@ -167,15 +162,12 @@ export default function Relatorios() {
     }
 
     else if (tipo === 'financeiro') {
-      const [{ data: receber }, { data: pagar }, { data: cargasData }] = await Promise.all([
-        supabase.from('vendas')
-          .select('id, comprador, client_id, carga_id, data_venda, data_vencimento, valor_total, valor_liquido, ptv_valor, funrural_valor, funrural_pct, desconto_avista_pct, status_pagamento, clients(nome)')
+      const [{ data: receber }, { data: pagar }] = await Promise.all([
+        supabase.from('vendas').select('comprador, client_id, data_venda, data_vencimento, valor_liquido, status_pagamento, clients(nome)')
           .in('status_pagamento', ['pendente','atrasado']).is('deleted_at', null).order('data_vencimento'),
         supabase.from('custos').select('descricao, supplier_id, data_vencimento, valor, status_pagamento, suppliers(nome)')
           .in('status_pagamento', ['pendente','atrasado']).is('deleted_at', null).order('data_vencimento'),
-        supabase.from('cargas').select('carga_id, data'),
       ])
-      setCargas(cargasData ?? [])
       const recRows = (receber ?? []).map(v => ({
         'Tipo':          '💰 A Receber',
         'Descrição':     v.clients?.nome || v.comprador || '—',
@@ -183,7 +175,6 @@ export default function Relatorios() {
         'Valor':         Number(v.valor_liquido ?? 0),
         'Status':        v.status_pagamento,
         'Vencida?':      v.data_vencimento && new Date(v.data_vencimento) < new Date() ? 'Sim' : 'Não',
-        _raw: v,
       }))
       const pagRows = (pagar ?? []).map(c => ({
         'Tipo':          '💸 A Pagar',
@@ -192,7 +183,6 @@ export default function Relatorios() {
         'Valor':         Number(c.valor ?? 0),
         'Status':        c.status_pagamento,
         'Vencida?':      c.data_vencimento && new Date(c.data_vencimento) < new Date() ? 'Sim' : 'Não',
-        _raw: null,
       }))
       let combined = [...recRows, ...pagRows].sort((a,b) => (a.Vencimento||'').localeCompare(b.Vencimento||''))
       if (filtroTipo === 'receber') combined = recRows
@@ -211,106 +201,6 @@ export default function Relatorios() {
     const v = r['Valor Líquido'] ?? r['Valor Bruto'] ?? r['Valor'] ?? r['Receita Bruta'] ?? r['Lucro Bruto'] ?? 0
     return s + Number(v)
   }, 0)
-
-
-  async function gerarRomaneio(venda) {
-    const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-    const fmtD = s => {
-      if (!s) return '—'
-      const p = String(s).slice(0, 10).split('-')
-      return `${p[2]}/${p[1]}/${p[0]}`
-    }
-    const cargaObj = cargas.find(c => c.carga_id === venda.carga_id)
-    const dataCarga = cargaObj?.data ?? null
-
-    let itensCarga = []
-    if (venda.carga_id) {
-      const { data } = await supabase
-        .from('carga_itens')
-        .select('quantidade_primeira,quantidade_segunda,peso_medio_primeira,peso_medio_segunda,preco_kg_primeira,preco_kg_segunda')
-        .eq('carga_id', venda.carga_id)
-      itensCarga = data ?? []
-    }
-
-    const grupos = {}
-    for (const it of itensCarga) {
-      const q1 = Number(it.quantidade_primeira) || 0
-      const q2 = Number(it.quantidade_segunda)  || 0
-      if (q1 > 0) {
-        const k = `1|${it.peso_medio_primeira}|${it.preco_kg_primeira}`
-        if (!grupos[k]) grupos[k] = { especie: `Banana 1ª · ${it.peso_medio_primeira} kg`, qtd: 0, peso: Number(it.peso_medio_primeira) || 0, preco: Number(it.preco_kg_primeira) || 0 }
-        grupos[k].qtd += q1
-      }
-      if (q2 > 0) {
-        const k = `2|${it.peso_medio_segunda}|${it.preco_kg_segunda}`
-        if (!grupos[k]) grupos[k] = { especie: `Banana 2ª · ${it.peso_medio_segunda} kg`, qtd: 0, peso: Number(it.peso_medio_segunda) || 0, preco: Number(it.preco_kg_segunda) || 0 }
-        grupos[k].qtd += q2
-      }
-    }
-    const linhas = Object.values(grupos).map(g => [g.especie, `${g.qtd} cx`, brl(g.preco), brl(g.qtd * g.peso * g.preco)])
-
-    const ptv      = Number(venda.ptv_valor)          || 0
-    const funrural = Number(venda.funrural_valor)      || 0
-    const descPct  = Number(venda.desconto_avista_pct) || 0
-    const descVal  = (Number(venda.valor_total) - funrural) * (descPct / 100)
-    const temDeduc = ptv !== 0 || funrural !== 0 || descVal !== 0
-
-    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
-    const W = 210, L = 15, R = 195
-    let y = 22
-
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(30, 90, 55)
-    doc.text('FRUTMINAS', W / 2, y, { align: 'center' }); y += 8
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(110, 110, 110)
-    doc.text('Romaneio de venda', W / 2, y, { align: 'center' }); y += 10
-    doc.setDrawColor(210, 210, 210); doc.setLineWidth(0.3); doc.line(L, y, R, y); y += 8
-
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(130, 130, 130)
-    doc.text('Cliente', L, y); doc.text('Data da carga', L, y + 7)
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(30, 30, 30)
-    doc.text(venda.comprador || '—', R, y, { align: 'right' })
-    doc.setFontSize(11); doc.text(fmtD(dataCarga), R, y + 7, { align: 'right' }); y += 20
-
-    autoTable(doc, {
-      startY: y, margin: { left: L, right: L },
-      head: [['ESPÉCIE', 'QTD', 'PREÇO UN.', 'TOTAL']],
-      body: linhas.length > 0 ? linhas : [['Sem itens de carga', '', '', '']],
-      styles: { fontSize: 10, cellPadding: { top: 4, bottom: 4, left: 3, right: 3 }, textColor: [40, 40, 40] },
-      headStyles: { fillColor: [255, 255, 255], textColor: [55, 120, 75], fontStyle: 'bold', fontSize: 9, lineWidth: { bottom: 0.4 }, lineColor: [200, 200, 200] },
-      columnStyles: { 0: { cellWidth: 'auto' }, 1: { halign: 'center', cellWidth: 22 }, 2: { halign: 'right', cellWidth: 32 }, 3: { halign: 'right', cellWidth: 36 } },
-      alternateRowStyles: { fillColor: [248, 249, 248] },
-    })
-    y = doc.lastAutoTable.finalY + 10
-
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(30, 30, 30)
-    doc.text('Valor total da carga', L, y); doc.text(brl(venda.valor_total), R, y, { align: 'right' }); y += 8
-
-    if (temDeduc) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(180, 50, 40)
-      doc.text('PTV', L, y); doc.text(`- ${brl(ptv)}`, R, y, { align: 'right' }); y += 6
-      doc.text(`Desconto à vista (${descPct}%)`, L, y); doc.text(`- ${brl(descVal)}`, R, y, { align: 'right' }); y += 6
-      doc.text(`Funrural (${venda.funrural_pct || 0}%)`, L, y); doc.text(`- ${brl(funrural)}`, R, y, { align: 'right' }); y += 10
-    }
-
-    doc.setDrawColor(210, 210, 210); doc.setLineWidth(0.3); doc.line(L, y, R, y); y += 10
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(90, 90, 90)
-    doc.text('Total com desconto', L, y + 4)
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(30, 110, 55)
-    doc.text(brl(venda.valor_liquido), R, y + 6, { align: 'right' })
-
-    const nomeSafe = (venda.comprador || 'cliente').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').toLowerCase()
-    const dataNome = dataCarga ? String(dataCarga).slice(0, 10).replace(/-/g, '') : 'data'
-    doc.save(`romaneio-${nomeSafe}-${dataNome}.pdf`)
-  }
-
-  async function baixarRomaneiosSelecionados() {
-    const vendas = dados.filter(r => r._raw && selecionados.has(r._raw.id)).map(r => r._raw)
-    for (const v of vendas) {
-      await gerarRomaneio(v)
-      // pequena pausa entre PDFs para não travar o browser
-      await new Promise(res => setTimeout(res, 300))
-    }
-  }
 
   return (
     <div>
@@ -469,60 +359,22 @@ export default function Relatorios() {
             )}
           </div>
 
-          {/* Barra de ações — só no financeiro */}
-          {relAtivo === 'financeiro' && (
-            <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:10, flexWrap:'wrap' }}>
-              <button className="btn btn-sm" onClick={() => {
-                const ids = dados.filter(r => r._raw && r['Vencida?'] === 'Sim').map(r => r._raw.id)
-                setSelecionados(new Set(ids))
-              }}>☑ Selecionar vencidas</button>
-              <button className="btn btn-sm" onClick={() => setSelecionados(new Set())}>✕ Limpar seleção</button>
-              {selecionados.size > 0 && (
-                <button className="btn btn-primary" style={{gap:6}} onClick={baixarRomaneiosSelecionados}>
-                  📋 Baixar romaneio{selecionados.size > 1 ? `s (${selecionados.size})` : ''}
-                </button>
-              )}
-              {selecionados.size > 0 && (
-                <span style={{fontSize:12, color:'var(--text-muted)'}}>{selecionados.size} selecionada{selecionados.size > 1 ? 's' : ''}</span>
-              )}
-            </div>
-          )}
-
           {/* Tabela */}
           <div className="card">
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    {relAtivo === 'financeiro' && <th style={{width:32}}></th>}
-                    {Object.keys(dados[0]).filter(k => !k.startsWith('_')).map(col => (
+                    {Object.keys(dados[0]).map(col => (
                       <th key={col}>{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {dados.map((row, i) => {
-                    const visibleCols = Object.keys(row).filter(k => !k.startsWith('_'))
-                    const id = row._raw?.id
-                    const isReceber = !!row._raw
-                    const sel = id && selecionados.has(id)
-                    return (
-                    <tr key={i} style={{ background: sel ? 'var(--green-light, #eaf5e4)' : undefined }}>
-                      {relAtivo === 'financeiro' && (
-                        <td style={{textAlign:'center', padding:'4px 6px'}}>
-                          {isReceber && (
-                            <input type="checkbox" checked={!!sel} onChange={() => {
-                              setSelecionados(prev => {
-                                const next = new Set(prev)
-                                next.has(id) ? next.delete(id) : next.add(id)
-                                return next
-                              })
-                            }} />
-                          )}
-                        </td>
-                      )}
-                      {visibleCols.map((col, j) => {
-                        const val = row[col]
+                  {dados.map((row, i) => (
+                    <tr key={i}>
+                      {Object.values(row).map((val, j) => {
+                        const col = Object.keys(row)[j]
                         const isValor = col.includes('Valor') || col.includes('Receita') || col.includes('Custo') || col.includes('Lucro')
                         const isStatus = col === 'Status'
                         const statusColor = { pendente:'var(--amber)', recebido:'var(--green)', pago:'var(--green)', atrasado:'var(--red)' }
@@ -537,8 +389,7 @@ export default function Relatorios() {
                         )
                       })}
                     </tr>
-                    )
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>

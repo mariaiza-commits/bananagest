@@ -420,12 +420,13 @@ export default function Vendas({ onAddBtn }) {
       doc.line(L, y, R, y)
       y += 8
 
-      // 2. CLIENTE / DATA DA CARGA
+      // 2. CLIENTE / DATA DA CARGA / VENCIMENTO
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
       doc.setTextColor(130, 130, 130)
       doc.text('Cliente', L, y)
       doc.text('Data da carga', L, y + 7)
+      doc.text('Vencimento', L, y + 16)
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(12)
@@ -433,7 +434,12 @@ export default function Vendas({ onAddBtn }) {
       doc.text(venda.comprador || '—', R, y, { align: 'right' })
       doc.setFontSize(11)
       doc.text(fmtD(dataCarga), R, y + 7, { align: 'right' })
-      y += 20
+
+      doc.setFontSize(13)
+      doc.setTextColor(30, 90, 55)
+      doc.text(venda.data_vencimento ? fmtD(venda.data_vencimento) : 'À vista', R, y + 17, { align: 'right' })
+      doc.setTextColor(30, 30, 30)
+      y += 28
 
       // 3. TABELA DE ITENS
       autoTable(doc, {
@@ -509,21 +515,7 @@ export default function Vendas({ onAddBtn }) {
       doc.text(brl(venda.valor_liquido), R, y + 6, { align: 'right' })
       y += 16
 
-      // 7. DATA DE VENCIMENTO
-      if (venda.data_vencimento) {
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
-        doc.setTextColor(90, 90, 90)
-        doc.text('Data de vencimento:', L, y)
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(30, 30, 30)
-        doc.text(fmtD(venda.data_vencimento), R, y, { align: 'right' })
-        y += 14
-      } else {
-        y += 6
-      }
-
-      // 8. BOX DADOS BANCÁRIOS
+      // 7. BOX DADOS BANCÁRIOS
       const boxH = 30
       doc.setFillColor(245, 250, 245)
       doc.setDrawColor(180, 210, 180)

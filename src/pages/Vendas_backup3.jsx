@@ -327,52 +327,36 @@ export default function Vendas({ onAddBtn }) {
       const cargaObj = cargas.find(c => c.carga_id === venda.carga_id)
       const dataCarga = cargaObj?.data ?? null
 
-      // buscar carga_itens com setor (variedade + cultura)
+      // buscar carga_itens (só os campos necessários)
       let itensCarga = []
       if (venda.carga_id) {
         const { data } = await supabase
           .from('carga_itens')
-          .select('quantidade_primeira,quantidade_segunda,peso_medio_primeira,peso_medio_segunda,preco_kg_primeira,preco_kg_segunda,setores(nome,variedade,cultura)')
+          .select('quantidade_primeira,quantidade_segunda,peso_medio_primeira,peso_medio_segunda,preco_kg_primeira,preco_kg_segunda')
           .eq('carga_id', venda.carga_id)
         itensCarga = data ?? []
       }
 
-      // helper: monta label da espécie
-      const especieLabel = (cultura, variedade, qual, peso) => {
-        const cult = (cultura || 'Banana').trim()
-        const vari = (variedade || '').trim()
-        const base = vari ? `${cult} ${vari}` : cult
-        return `${base} ${qual} · ${peso} kg`
-      }
-
-      // consolidar por (variedade + qualidade + peso + preco)
+      // consolidar por (qualidade, peso, preco) — mesmos campo viram 1 linha
       const grupos = {}
       for (const it of itensCarga) {
-        const cultura   = it.setores?.cultura   || 'Banana'
-        const variedade = it.setores?.variedade  || ''
         const q1 = Number(it.quantidade_primeira) || 0
         const q2 = Number(it.quantidade_segunda)  || 0
         if (q1 > 0) {
-          const peso  = Number(it.peso_medio_primeira) || 0
-          const preco = Number(it.preco_kg_primeira)   || 0
-          const k = `${variedade}|1|${peso}|${preco}`
+          const k = `1|${it.peso_medio_primeira}|${it.preco_kg_primeira}`
           if (!grupos[k]) grupos[k] = {
-            especie: especieLabel(cultura, variedade, '1ª', peso),
-            qtd: 0, peso, preco, total: 0,
+            especie: `Banana 1ª · ${it.peso_medio_primeira} kg`,
+            qtd: 0, peso: Number(it.peso_medio_primeira) || 0, preco: Number(it.preco_kg_primeira) || 0,
           }
-          grupos[k].qtd   += q1
-          grupos[k].total += q1 * peso * preco
+          grupos[k].qtd += q1
         }
         if (q2 > 0) {
-          const peso  = Number(it.peso_medio_segunda) || 0
-          const preco = Number(it.preco_kg_segunda)   || 0
-          const k = `${variedade}|2|${peso}|${preco}`
+          const k = `2|${it.peso_medio_segunda}|${it.preco_kg_segunda}`
           if (!grupos[k]) grupos[k] = {
-            especie: especieLabel(cultura, variedade, '2ª', peso),
-            qtd: 0, peso, preco, total: 0,
+            especie: `Banana 2ª · ${it.peso_medio_segunda} kg`,
+            qtd: 0, peso: Number(it.peso_medio_segunda) || 0, preco: Number(it.preco_kg_segunda) || 0,
           }
-          grupos[k].qtd   += q2
-          grupos[k].total += q2 * peso * preco
+          grupos[k].qtd += q2
         }
       }
 
@@ -380,7 +364,7 @@ export default function Vendas({ onAddBtn }) {
         g.especie,
         `${g.qtd} cx`,
         brl(g.preco),
-        brl(g.total),
+        brl(g.qtd * g.peso * g.preco),
       ])
 
       // deduções
@@ -395,32 +379,25 @@ export default function Vendas({ onAddBtn }) {
       const W = 210, L = 15, R = 195
       let y = 22
 
-      // 1. CABEÇALHO — FRUTMINAS + endereço fixo
+      // cabeçalho
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(22)
       doc.setTextColor(30, 90, 55)
       doc.text('FRUTMINAS', W / 2, y, { align: 'center' })
-      y += 7
+      y += 8
 
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.setTextColor(100, 100, 100)
-      doc.text('Área Á · Lote 338', W / 2, y, { align: 'center' })
-      y += 5
-      doc.text('Jaíba — MG', W / 2, y, { align: 'center' })
-      y += 5
-
       doc.setFontSize(10)
       doc.setTextColor(110, 110, 110)
       doc.text('Romaneio de venda', W / 2, y, { align: 'center' })
-      y += 8
+      y += 10
 
       doc.setDrawColor(210, 210, 210)
       doc.setLineWidth(0.3)
       doc.line(L, y, R, y)
       y += 8
 
-      // 2. CLIENTE / DATA DA CARGA
+      // cliente / data
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
       doc.setTextColor(130, 130, 130)
@@ -435,7 +412,7 @@ export default function Vendas({ onAddBtn }) {
       doc.text(fmtD(dataCarga), R, y + 7, { align: 'right' })
       y += 20
 
-      // 3. TABELA DE ITENS
+      // tabela de itens
       autoTable(doc, {
         startY: y,
         margin: { left: L, right: L },
@@ -464,7 +441,7 @@ export default function Vendas({ onAddBtn }) {
       })
       y = doc.lastAutoTable.finalY + 10
 
-      // 4. VALOR TOTAL DA CARGA
+      // valor total da carga
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(11)
       doc.setTextColor(30, 30, 30)
@@ -472,7 +449,7 @@ export default function Vendas({ onAddBtn }) {
       doc.text(brl(venda.valor_total), R, y, { align: 'right' })
       y += 8
 
-      // 5. DEDUÇÕES
+      // deduções (aparecem sempre que ao menos uma for != 0)
       if (temDeduc) {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
@@ -491,13 +468,13 @@ export default function Vendas({ onAddBtn }) {
         y += 10
       }
 
-      // linha separadora
+      // linha final
       doc.setDrawColor(210, 210, 210)
       doc.setLineWidth(0.3)
       doc.line(L, y, R, y)
       y += 10
 
-      // 6. TOTAL COM DESCONTO
+      // total com desconto
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(11)
       doc.setTextColor(90, 90, 90)
@@ -507,45 +484,6 @@ export default function Vendas({ onAddBtn }) {
       doc.setFontSize(22)
       doc.setTextColor(30, 110, 55)
       doc.text(brl(venda.valor_liquido), R, y + 6, { align: 'right' })
-      y += 16
-
-      // 7. DATA DE VENCIMENTO
-      if (venda.data_vencimento) {
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
-        doc.setTextColor(90, 90, 90)
-        doc.text('Data de vencimento:', L, y)
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(30, 30, 30)
-        doc.text(fmtD(venda.data_vencimento), R, y, { align: 'right' })
-        y += 14
-      } else {
-        y += 6
-      }
-
-      // 8. BOX DADOS BANCÁRIOS
-      const boxH = 30
-      doc.setFillColor(245, 250, 245)
-      doc.setDrawColor(180, 210, 180)
-      doc.setLineWidth(0.4)
-      doc.roundedRect(L, y, R - L, boxH, 3, 3, 'FD')
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(40, 100, 55)
-      doc.text('DADOS BANCÁRIOS', L + 5, y + 7)
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      doc.setTextColor(30, 30, 30)
-      doc.text('Favorecido:', L + 5, y + 15)
-      doc.setFont('helvetica', 'bold')
-      doc.text('Ailson Mendes Ramos', L + 32, y + 15)
-
-      doc.setFont('helvetica', 'normal')
-      doc.text('Chave PIX:', L + 5, y + 23)
-      doc.setFont('helvetica', 'bold')
-      doc.text('026.417.706-10', L + 32, y + 23)
 
       // nome do arquivo: romaneio-cliente-dataCarga.pdf
       const nomeSafe = (venda.comprador || 'cliente')

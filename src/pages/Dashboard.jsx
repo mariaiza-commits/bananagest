@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+﻿import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { Bar } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js'
 import { supabase } from '../lib/supabase'
@@ -20,8 +20,8 @@ function KpiCard({ icon, label, value, sub, color = 'var(--text)', bg, badge }) 
         {badge && <span style={{ fontSize: 10, background: badge.bg, color: badge.color, borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{badge.text}</span>}
         <span className="kpi-icon">{icon}</span>
       </div>
-      <div className="kpi-value" style={{ color, fontFamily: 'var(--font-display)', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+      <div className="kpi-value" style={{ color, fontFamily: 'var(--font-display)', lineHeight: 1.2, wordBreak: 'break-word' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{sub}</div>}
     </div>
   )
 }
@@ -161,12 +161,20 @@ export default function Dashboard() {
   useEffect(() => { load() }, [load])
 
   // Métricas derivadas
-  const receita   = Number(kpis?.receita_mes ?? 0)
-  const custo     = Number(kpis?.custo_mes ?? 0)
-  const lucro     = Number(kpis?.lucro_mes ?? 0)
-  const caixas    = Number(kpis?.caixas_mes ?? 0)
-  const margem    = receita > 0 ? (lucro / receita * 100).toFixed(1) : 0
-  const precoMed  = caixas > 0 ? receita / caixas : 0
+  const receita      = Number(kpis?.receita_mes ?? 0)
+  const custo        = Number(kpis?.custo_mes ?? 0)
+  const lucro        = Number(kpis?.lucro_mes ?? 0)
+  const caixas       = Number(kpis?.caixas_mes ?? 0)
+  const margem       = receita > 0 ? (lucro / receita * 100).toFixed(1) : 0
+  const precoMed     = caixas > 0 ? receita / caixas : 0
+  // campos novos do banco
+  const recebidoMes  = Number(kpis?.recebido_mes  ?? 0)
+  const aReceberMes  = Number(kpis?.a_receber_mes  ?? 0)
+  const pagoMes      = Number(kpis?.pago_mes       ?? 0)
+  const aPagarMes    = Number(kpis?.a_pagar_mes    ?? 0)
+  const entradasMes  = recebidoMes + aReceberMes
+  const saidasMes    = pagoMes + aPagarMes
+  const sobraMes     = entradasMes - saidasMes
   const totalLucro = lotes.reduce((s, l) => s + Number(l.lucro_bruto ?? 0), 0)
   const cultComReceita = culturas.filter(c => Number(c.receita_total) > 0)
   const totalAtrasado = atraso.reduce((s, a) => s + Number(a.valor ?? 0), 0)
@@ -175,7 +183,7 @@ export default function Dashboard() {
   // Alertas automáticos
   const alertas = useMemo(() => {
     const list = []
-    if (receita > 0 && custo === 0) list.push({ type:'warning', text:'Custos não lançados no mês. O lucro pode estar superestimado.' })
+    if (receita > 0 && custo === 0) list.push({ type:'warning', text:'Ainda não há despesas lançadas no mês. A sobra prevista pode estar maior que a real.' })
     if (cultComReceita.length === 1) list.push({ type:'info', text:`Apenas a cultura ${cultComReceita[0]?.cultura} possui vendas no período.` })
 
     if (totalAtrasado > 0) list.push({ type:'warning', text:`${atraso.length} conta(s) em atraso totalizando ${fmt(totalAtrasado)}.` })
@@ -209,14 +217,38 @@ export default function Dashboard() {
         {mesOffset !== 0 && <button className="btn btn-sm" style={{background:'var(--green)',color:'white'}} onClick={() => setMesOffset(0)}>Hoje</button>}
       </div>
 
-      {/* KPI CARDS — largura total */}
-      <div className="kpi-grid">
-        <KpiCard icon="💰" label="Receita" value={fmt(receita)} sub={`A receber: ${fmt(kpis?.total_a_receber)}`} color="var(--teal)" />
-        <KpiCard icon="💸" label="Custos" value={fmt(custo)} sub={`A pagar: ${fmt(kpis?.total_a_pagar)}`} color={custo > 0 ? 'var(--amber)' : 'var(--text-muted)'} />
-        <KpiCard icon="📈" label="Lucro" value={fmt(lucro)} sub={`Margem: ${margem}%`} color={cor(lucro)} />
-        <KpiCard icon="📦" label="Caixas" value={caixas.toLocaleString('pt-BR')} sub="vendidas no período" color="var(--text)" />
-        <KpiCard icon="🏷️" label="Preço médio/cx" value={precoMed > 0 ? fmt(precoMed) : '—'} sub="receita ÷ caixas" color="var(--text)" />
-        <KpiCard icon="%" label="Margem" value={margem > 0 ? `${margem}%` : '—'} sub="lucro ÷ receita" color={Number(margem) >= 30 ? 'var(--green)' : Number(margem) > 0 ? 'var(--amber)' : 'var(--text-muted)'} />
+      {/* KPI CARDS — 4 cartões do produtor */}
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+        <KpiCard
+          icon="📥" label="Entradas do mês"
+          value={fmt(entradasMes)}
+          color="var(--teal)"
+          sub={<>
+            <span style={{display:'block'}}>Recebido: <strong>{fmt(recebidoMes)}</strong></span>
+            <span style={{display:'block'}}>A receber: <strong>{fmt(aReceberMes)}</strong></span>
+          </>}
+        />
+        <KpiCard
+          icon="📤" label="Saídas do mês"
+          value={fmt(saidasMes)}
+          color={saidasMes > 0 ? 'var(--amber)' : 'var(--text-muted)'}
+          sub={<>
+            <span style={{display:'block'}}>Pago: <strong>{fmt(pagoMes)}</strong></span>
+            <span style={{display:'block'}}>A pagar: <strong>{fmt(aPagarMes)}</strong></span>
+          </>}
+        />
+        <KpiCard
+          icon={sobraMes >= 0 ? '✅' : '⚠️'} label="Sobra no mês"
+          value={fmt(sobraMes)}
+          color={sobraMes >= 0 ? 'var(--green)' : 'var(--red)'}
+          sub="previsto no mês"
+        />
+        <KpiCard
+          icon="📦" label="Caixas no mês"
+          value={caixas.toLocaleString('pt-BR')}
+          color="var(--text)"
+          sub="vendidas no período"
+        />
       </div>
 
       {/* ALERTAS DE ANÁLISE */}
@@ -430,6 +462,18 @@ export default function Dashboard() {
 
         </div>
       </div>
+
+      {/* ANÁLISE DETALHADA — Lucro, Margem, Preço médio (para gestão) */}
+      <details style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
+        <summary style={{ fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--text-muted)', userSelect: 'none' }}>
+          📊 Análise detalhada (Lucro · Margem · Preço médio)
+        </summary>
+        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', marginTop: 14 }}>
+          <KpiCard icon="📈" label="Lucro" value={fmt(lucro)} sub={`Margem: ${margem}%`} color={cor(lucro)} />
+          <KpiCard icon="🏷️" label="Preço médio/cx" value={precoMed > 0 ? fmt(precoMed) : '—'} sub="receita ÷ caixas" color="var(--text)" />
+          <KpiCard icon="%" label="Margem" value={margem > 0 ? `${margem}%` : '—'} sub="lucro ÷ receita" color={Number(margem) >= 30 ? 'var(--green)' : Number(margem) > 0 ? 'var(--amber)' : 'var(--text-muted)'} />
+        </div>
+      </details>
 
     </div>
   )

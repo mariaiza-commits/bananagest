@@ -112,39 +112,39 @@ export default function Dashboard() {
         new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout:${label}`)), ms))
       ])
 
-      // fn_dashboard_mes separado para não bloquear os outros
-      const dashResult = await withTimeout(
-        supabase.rpc('fn_dashboard_mes', { p_mes: mesStr }),
-        25000, 'fn_dashboard_mes'
-      )
-      if (dashResult.error) {
-        console.error('[Dashboard] fn_dashboard_mes error:', dashResult.error)
-        if (handleAuthError(dashResult.error)) return
-      } else {
-        const d = dashResult.data
-        setKpis(Array.isArray(d) ? d[0] : d)
-      }
-
-      // Demais queries em paralelo, falhas individuais não bloqueiam
-      const [resumoR, cultR, pagar7dR, emAtrasoR, receberR] = await withTimeout(
+      // Tudo numa unica ida e volta. O banco esta em us-west-2 (Oregon) e cada
+      // round trip custa ~200ms — rodar fn_dashboard_mes sozinho antes das views
+      // dobrava a espera sem ganho nenhum. Promise.allSettled mantem o
+      // comportamento de falha individual nao bloquear as outras.
+      const [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR] = await withTimeout(
         Promise.allSettled([
+          supabase.rpc('fn_dashboard_mes', { p_mes: mesStr }),
           supabase.from('vw_resumo_por_lote').select('*'),
           supabase.from('vw_resumo_por_cultura').select('*'),
           supabase.from('vw_contas_a_pagar').select('*').gte('data_vencimento', hojeStr).lte('data_vencimento', em7d),
           supabase.from('vw_contas_a_pagar').select('*').lt('data_vencimento', hojeStr).order('data_vencimento', { ascending: true }).limit(10),
           supabase.from('vw_contas_a_receber').select('*').order('data_vencimento', { ascending: true }).limit(5),
         ]),
-        25000, 'views'
+        25000, 'dashboard'
       )
 
       const ok = r => r.status === 'fulfilled' ? r.value.data : null
       const err = (r, name) => { if (r.status === 'rejected' || r.value?.error) console.error(`[Dashboard] ${name}:`, r.status === 'rejected' ? r.reason : r.value.error) }
+      err(dashR, 'fn_dashboard_mes')
       err(resumoR, 'vw_resumo_por_lote')
       err(cultR, 'vw_resumo_por_cultura')
       err(pagar7dR, 'vw_contas_a_pagar (7d)')
       err(emAtrasoR, 'vw_contas_a_pagar (atraso)')
       err(receberR, 'vw_contas_a_receber')
 
+      // Preserva o handleAuthError: se o JWT morreu, qualquer uma das 6 acusa.
+      const firstError = [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR]
+        .map(r => r.status === 'fulfilled' ? r.value?.error : null)
+        .find(Boolean)
+      if (firstError && handleAuthError(firstError)) return
+
+      const d = ok(dashR)
+      if (d) setKpis(Array.isArray(d) ? d[0] : d)
       setLotes(ok(resumoR) ?? [])
       setCulturas(ok(cultR) ?? [])
       setVencer(ok(pagar7dR) ?? [])
@@ -177,10 +177,7 @@ export default function Dashboard() {
     const list = []
     if (receita > 0 && custo === 0) list.push({ type:'warning', text:'Custos não lançados no mês. O lucro pode estar superestimado.' })
     if (cultComReceita.length === 1) list.push({ type:'info', text:`Apenas a cultura ${cultComReceita[0]?.cultura} possui vendas no período.` })
-    if (lotes.length > 0) {
-      const top = [...lotes].sort((a,b)=>Number(b.receita_bruta)-Number(a.receita_bruta))[0]
-      if (top && receita > 0 && Number(top.receita_bruta)/receita > 0.7) list.push({ type:'info', text:`O lote ${top.lote} concentra ${pct(Number(top.receita_bruta), receita)} da receita do mês.` })
-    }
+
     if (totalAtrasado > 0) list.push({ type:'warning', text:`${atraso.length} conta(s) em atraso totalizando ${fmt(totalAtrasado)}.` })
     return list
   }, [kpis, lotes, culturas, atraso])
@@ -189,9 +186,9 @@ export default function Dashboard() {
   const resumoExec = useMemo(() => {
     if (!receita) return 'Nenhuma venda registrada no período.'
     const nLotes = lotes.filter(l => Number(l.receita_bruta) > 0).length
-    const cultDesc = cultComReceita.length === 1 ? `A cultura ${cultComReceita[0]?.cultura} representa 100% da receita.` : `${cultComReceita.length} culturas geraram receita no período.`
+    const cultDesc = cultComReceita.length === 1 ? `A cultura ${cultComReceita[0]?.cultura} representa 100% da receita.` : cultComReceita.length > 1 ? `${cultComReceita.length} culturas geraram receita no período.` : ''
     const custoDesc = custo === 0 ? 'Não há custos lançados.' : `Custos lançados: ${fmt(custo)}.`
-    return `No período, foram vendidas ${caixas.toLocaleString('pt-BR')} caixas em ${nLotes} lote(s), gerando ${fmt(receita)}. ${cultDesc} ${custoDesc}`
+    return `No período, foram vendidas ${caixas.toLocaleString('pt-BR')} caixas em ${nLotes} lote(s), gerando ${fmt(receita)}. ${cultDesc} ${custoDesc}`.trim()
   }, [kpis, lotes, culturas])
 
   if (loading) return <DashboardSkeleton />

@@ -85,13 +85,9 @@ export default function Dashboard() {
   const [kpis, setKpis]       = useState(null)
   const [lotes, setLotes]     = useState([])
   const [culturas, setCulturas] = useState([])
-  const [vencer, setVencer]           = useState([])
-  const [atraso, setAtraso]           = useState([])
-  const [receber, setReceber]         = useState([])
-  const [pagarFuturo, setPagarFuturo] = useState([])
-  const [recVencido, setRecVencido]   = useState([])
-  const [rec7d, setRec7d]             = useState([])
-  const [recFuturo, setRecFuturo]     = useState([])
+  const [vencer, setVencer]   = useState([])
+  const [atraso, setAtraso]   = useState([])
+  const [receber, setReceber] = useState([])
   const [loading, setLoading] = useState(true)
   const [mesOffset, setMesOffset] = useState(0)
 
@@ -120,8 +116,7 @@ export default function Dashboard() {
       // round trip custa ~200ms — rodar fn_dashboard_mes sozinho antes das views
       // dobrava a espera sem ganho nenhum. Promise.allSettled mantem o
       // comportamento de falha individual nao bloquear as outras.
-      const [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR,
-             pagarFuturoR, recVencidoR, rec7dR, recFuturoR] = await withTimeout(
+      const [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR] = await withTimeout(
         Promise.allSettled([
           supabase.rpc('fn_dashboard_mes', { p_mes: mesStr }),
           supabase.from('vw_resumo_por_lote').select('*'),
@@ -129,11 +124,6 @@ export default function Dashboard() {
           supabase.from('vw_contas_a_pagar').select('*').gte('data_vencimento', hojeStr).lte('data_vencimento', em7d),
           supabase.from('vw_contas_a_pagar').select('*').lt('data_vencimento', hojeStr).order('data_vencimento', { ascending: true }).limit(10),
           supabase.from('vw_contas_a_receber').select('*').order('data_vencimento', { ascending: true }).limit(5),
-          // novos
-          supabase.from('vw_contas_a_pagar').select('*').gt('data_vencimento', em7d).order('data_vencimento').limit(5),
-          supabase.from('vw_contas_a_receber').select('*').lt('data_vencimento', hojeStr).order('data_vencimento').limit(10),
-          supabase.from('vw_contas_a_receber').select('*').gte('data_vencimento', hojeStr).lte('data_vencimento', em7d).order('data_vencimento'),
-          supabase.from('vw_contas_a_receber').select('*').gt('data_vencimento', em7d).order('data_vencimento').limit(5),
         ]),
         25000, 'dashboard'
       )
@@ -146,13 +136,9 @@ export default function Dashboard() {
       err(pagar7dR, 'vw_contas_a_pagar (7d)')
       err(emAtrasoR, 'vw_contas_a_pagar (atraso)')
       err(receberR, 'vw_contas_a_receber')
-      err(pagarFuturoR, 'vw_contas_a_pagar (futuro)')
-      err(recVencidoR, 'vw_contas_a_receber (vencido)')
-      err(rec7dR, 'vw_contas_a_receber (7d)')
-      err(recFuturoR, 'vw_contas_a_receber (futuro)')
 
       // Preserva o handleAuthError: se o JWT morreu, qualquer uma das 6 acusa.
-      const firstError = [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR, pagarFuturoR, recVencidoR, rec7dR, recFuturoR]
+      const firstError = [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR]
         .map(r => r.status === 'fulfilled' ? r.value?.error : null)
         .find(Boolean)
       if (firstError && handleAuthError(firstError)) return
@@ -164,10 +150,6 @@ export default function Dashboard() {
       setVencer(ok(pagar7dR) ?? [])
       setAtraso(ok(emAtrasoR) ?? [])
       setReceber(ok(receberR) ?? [])
-      setPagarFuturo(ok(pagarFuturoR) ?? [])
-      setRecVencido(ok(recVencidoR) ?? [])
-      setRec7d(ok(rec7dR) ?? [])
-      setRecFuturo(ok(recFuturoR) ?? [])
     } catch (e) {
       console.error('[Dashboard] load error:', e.message)
       handleAuthError(e)
@@ -379,25 +361,44 @@ export default function Dashboard() {
         {/* ── COLUNA DIREITA ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* QUADROS RECEBER / PAGAR */}
-          <QuadroFinanceiro
-            titulo="Para receber"
-            vencido={recVencido}
-            semana={rec7d}
-            futuro={recFuturo}
-            campoNome={r => r.comprador || '—'}
-            campoValor={r => Number(r.valor_liquido ?? r.valor_total ?? 0)}
-            isReceber={true}
-          />
-          <QuadroFinanceiro
-            titulo="Para pagar"
-            vencido={atraso}
-            semana={vencer}
-            futuro={pagarFuturo}
-            campoNome={r => r.fornecedor || r.descricao || '—'}
-            campoValor={r => Number(r.valor ?? 0)}
-            isReceber={false}
-          />
+          {/* ALERTAS FINANCEIROS */}
+          {temAlertasFinanceiros && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {atraso.length > 0 && (
+                <div style={{ background: '#fff5f5', border: '1px solid var(--red-mid)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--red)', marginBottom: 8 }}>🚨 {atraso.length} em atraso — {fmt(totalAtrasado)}</div>
+                  {atraso.slice(0, 4).map(a => (
+                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4, color: 'var(--text)' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{a.descricao ?? a.fornecedor}</span>
+                      <strong>{fmt(a.valor)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {vencer.length > 0 && (
+                <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e', marginBottom: 8 }}>⚠️ {vencer.length} vencem em 7 dias — {fmt(totalVencer)}</div>
+                  {vencer.slice(0, 4).map(v => (
+                    <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span>{fmtDate(v.data_vencimento)} · {v.lote}</span>
+                      <strong>{fmt(v.valor)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {receber.length > 0 && (
+                <div style={{ background: '#f0fdf4', border: '1px solid var(--green-mid)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--green)', marginBottom: 8 }}>💰 {receber.length} a receber — {fmt(receber.reduce((s,r)=>s+Number(r.valor_total??0),0))}</div>
+                  {receber.slice(0, 4).map(r => (
+                    <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span>{r.comprador?.substring(0, 22)}</span>
+                      <strong>{fmt(r.valor_total)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* RESUMO POR CULTURA - removido a pedido */}
           {false && <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
@@ -474,76 +475,6 @@ export default function Dashboard() {
         </div>
       </details>
 
-    </div>
-  )
-}
-
-
-// ─── QUADRO FINANCEIRO (Receber ou Pagar) ────────────────────────────────────
-function QuadroFinanceiro({ titulo, vencido, semana, futuro, campoNome, campoValor, isReceber }) {
-  const fmt2 = v => Number(v||0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' })
-  const fmtDia = s => {
-    if (!s) return ''
-    const p = String(s).slice(0,10).split('-')
-    return `${p[2]}/${p[1]}`
-  }
-  const totalVenc  = vencido.reduce((s,r) => s + campoValor(r), 0)
-  const totalSem   = semana.reduce((s,r) => s + campoValor(r), 0)
-  const totalFut   = futuro.reduce((s,r) => s + campoValor(r), 0)
-  const tudo_vazio = vencido.length === 0 && semana.length === 0 && futuro.length === 0
-
-  const ItemLinha = ({ r }) => (
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', fontSize:12, marginBottom:5, gap:6 }}>
-      <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--text)' }}>
-        {campoNome(r)}
-        {r.data_vencimento && <span style={{ color:'var(--text-muted)', marginLeft:5 }}>{fmtDia(r.data_vencimento)}</span>}
-        {r.lote && <span style={{ color:'var(--text-muted)', marginLeft:5 }}>· {r.lote}</span>}
-      </span>
-      <strong style={{ whiteSpace:'nowrap', flexShrink:0 }}>{fmt2(campoValor(r))}</strong>
-    </div>
-  )
-
-  const Faixa = ({ itens, total, label, corBorda, corTitulo, corFundo }) => {
-    if (itens.length === 0) return null
-    const MAX = 3
-    const resto = itens.length - MAX
-    return (
-      <div style={{ borderLeft:`3px solid ${corBorda}`, paddingLeft:10, marginBottom:10 }}>
-        <div style={{ fontSize:11, fontWeight:700, color:corTitulo, marginBottom:6, display:'flex', justifyContent:'space-between' }}>
-          <span>{label}</span>
-          <span>{fmt2(total)}</span>
-        </div>
-        {itens.slice(0, MAX).map((r,i) => <ItemLinha key={r.id ?? i} r={r} />)}
-        {resto > 0 && <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>+{resto} mais</div>}
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px' }}>
-      <div style={{ fontWeight:700, fontSize:14, marginBottom:12, color:'var(--text)' }}>{titulo}</div>
-      {tudo_vazio
-        ? <div style={{ fontSize:13, color:'var(--text-muted)', fontStyle:'italic' }}>
-            {isReceber ? 'Nada a receber no momento.' : 'Nada a pagar no momento.'}
-          </div>
-        : <>
-            <Faixa
-              itens={vencido} total={totalVenc}
-              label="Vencido"
-              corBorda="var(--red)" corTitulo="var(--red)"
-            />
-            <Faixa
-              itens={semana} total={totalSem}
-              label="Esta semana"
-              corBorda="#f59e0b" corTitulo="#92400e"
-            />
-            <Faixa
-              itens={futuro} total={totalFut}
-              label="Futuras"
-              corBorda="var(--border)" corTitulo="var(--text-muted)"
-            />
-          </>
-      }
     </div>
   )
 }

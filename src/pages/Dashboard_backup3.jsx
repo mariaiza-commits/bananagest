@@ -88,8 +88,10 @@ export default function Dashboard() {
   const [vencer, setVencer]           = useState([])
   const [atraso, setAtraso]           = useState([])
   const [receber, setReceber]         = useState([])
+  const [pagarFuturo, setPagarFuturo] = useState([])
   const [recVencido, setRecVencido]   = useState([])
   const [rec7d, setRec7d]             = useState([])
+  const [recFuturo, setRecFuturo]     = useState([])
   const [loading, setLoading] = useState(true)
   const [mesOffset, setMesOffset] = useState(0)
 
@@ -119,7 +121,7 @@ export default function Dashboard() {
       // dobrava a espera sem ganho nenhum. Promise.allSettled mantem o
       // comportamento de falha individual nao bloquear as outras.
       const [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR,
-             recVencidoR, rec7dR] = await withTimeout(
+             pagarFuturoR, recVencidoR, rec7dR, recFuturoR] = await withTimeout(
         Promise.allSettled([
           supabase.rpc('fn_dashboard_mes', { p_mes: mesStr }),
           supabase.from('vw_resumo_por_lote').select('*'),
@@ -127,8 +129,11 @@ export default function Dashboard() {
           supabase.from('vw_contas_a_pagar').select('*').gte('data_vencimento', hojeStr).lte('data_vencimento', em7d),
           supabase.from('vw_contas_a_pagar').select('*').lt('data_vencimento', hojeStr).order('data_vencimento', { ascending: true }).limit(10),
           supabase.from('vw_contas_a_receber').select('*').order('data_vencimento', { ascending: true }).limit(5),
+          // novos
+          supabase.from('vw_contas_a_pagar').select('*').gt('data_vencimento', em7d).order('data_vencimento').limit(5),
           supabase.from('vw_contas_a_receber').select('*').lt('data_vencimento', hojeStr).order('data_vencimento').limit(10),
           supabase.from('vw_contas_a_receber').select('*').gte('data_vencimento', hojeStr).lte('data_vencimento', em7d).order('data_vencimento'),
+          supabase.from('vw_contas_a_receber').select('*').gt('data_vencimento', em7d).order('data_vencimento').limit(5),
         ]),
         25000, 'dashboard'
       )
@@ -141,11 +146,13 @@ export default function Dashboard() {
       err(pagar7dR, 'vw_contas_a_pagar (7d)')
       err(emAtrasoR, 'vw_contas_a_pagar (atraso)')
       err(receberR, 'vw_contas_a_receber')
+      err(pagarFuturoR, 'vw_contas_a_pagar (futuro)')
       err(recVencidoR, 'vw_contas_a_receber (vencido)')
       err(rec7dR, 'vw_contas_a_receber (7d)')
+      err(recFuturoR, 'vw_contas_a_receber (futuro)')
 
       // Preserva o handleAuthError: se o JWT morreu, qualquer uma das 6 acusa.
-      const firstError = [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR, recVencidoR, rec7dR]
+      const firstError = [dashR, resumoR, cultR, pagar7dR, emAtrasoR, receberR, pagarFuturoR, recVencidoR, rec7dR, recFuturoR]
         .map(r => r.status === 'fulfilled' ? r.value?.error : null)
         .find(Boolean)
       if (firstError && handleAuthError(firstError)) return
@@ -157,8 +164,10 @@ export default function Dashboard() {
       setVencer(ok(pagar7dR) ?? [])
       setAtraso(ok(emAtrasoR) ?? [])
       setReceber(ok(receberR) ?? [])
+      setPagarFuturo(ok(pagarFuturoR) ?? [])
       setRecVencido(ok(recVencidoR) ?? [])
       setRec7d(ok(rec7dR) ?? [])
+      setRecFuturo(ok(recFuturoR) ?? [])
     } catch (e) {
       console.error('[Dashboard] load error:', e.message)
       handleAuthError(e)
@@ -375,6 +384,7 @@ export default function Dashboard() {
             titulo="Para receber"
             vencido={recVencido}
             semana={rec7d}
+            futuro={recFuturo}
             campoNome={r => r.comprador || '—'}
             campoValor={r => Number(r.valor_liquido ?? r.valor_total ?? 0)}
             isReceber={true}
@@ -383,6 +393,7 @@ export default function Dashboard() {
             titulo="Para pagar"
             vencido={atraso}
             semana={vencer}
+            futuro={pagarFuturo}
             campoNome={r => r.fornecedor || r.descricao || '—'}
             campoValor={r => Number(r.valor ?? 0)}
             isReceber={false}
@@ -469,7 +480,7 @@ export default function Dashboard() {
 
 
 // ─── QUADRO FINANCEIRO (Receber ou Pagar) ────────────────────────────────────
-function QuadroFinanceiro({ titulo, vencido, semana, campoNome, campoValor, isReceber }) {
+function QuadroFinanceiro({ titulo, vencido, semana, futuro, campoNome, campoValor, isReceber }) {
   const fmt2 = v => Number(v||0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' })
   const fmtDia = s => {
     if (!s) return ''
@@ -478,7 +489,8 @@ function QuadroFinanceiro({ titulo, vencido, semana, campoNome, campoValor, isRe
   }
   const totalVenc  = vencido.reduce((s,r) => s + campoValor(r), 0)
   const totalSem   = semana.reduce((s,r) => s + campoValor(r), 0)
-  const tudo_vazio = vencido.length === 0 && semana.length === 0
+  const totalFut   = futuro.reduce((s,r) => s + campoValor(r), 0)
+  const tudo_vazio = vencido.length === 0 && semana.length === 0 && futuro.length === 0
 
   const ItemLinha = ({ r }) => (
     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', fontSize:12, marginBottom:5, gap:6 }}>
@@ -525,7 +537,11 @@ function QuadroFinanceiro({ titulo, vencido, semana, campoNome, campoValor, isRe
               label="Esta semana"
               corBorda="#f59e0b" corTitulo="#92400e"
             />
-
+            <Faixa
+              itens={futuro} total={totalFut}
+              label="Futuras"
+              corBorda="var(--border)" corTitulo="var(--text-muted)"
+            />
           </>
       }
     </div>
